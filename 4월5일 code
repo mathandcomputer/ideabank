@@ -1,0 +1,132 @@
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <stdio.h>
+#include "NtKinect.h"
+using namespace std;
+#include <time.h>
+
+
+//현재 시간 측정
+string now() {
+    char s[1024];
+    time_t t = time(NULL);
+    struct tm lnow;
+    localtime_s(&lnow, &t);
+    sprintf_s(s, "%04d-%02d-%02d_%02d-%02d-%02d", lnow.tm_year + 1900, lnow.tm_mon + 1, lnow.tm_mday, lnow.tm_hour, lnow.tm_min, lnow.tm_sec);
+    return string(s);
+}
+
+//프로그램 진행
+void doJob() {
+    NtKinect kinect;
+    char strPath[] = { "C:\\Users\\임승호\\source\\repos\\opencv\\opencv\\2021-04-02_14-41-59.avi" };
+    int dele = remove(strPath);
+
+    if (dele == 0) {
+        printf("파일삭제 성공");
+    }
+    else if (dele == -1) {
+        printf("파일삭제 실패");
+    }
+
+    //변수선언 
+    int fram = 0;    // 프레임
+    float rate_start_Y, rate_end_Y = 0.0;    // Y 변화율 측정 변수
+    float coor_Y = 0.0;    // 머리의 Y좌표
+    float coor_X = 0.0;    // 머리의 X좌표
+    char key_save = 'r';    // 저장 알고리즘으로 가는 key
+    int dang = 0;    // 영상삭제 일시 정지하기 위한 변수
+
+    //동영상 환경설정
+    cv::VideoWriter vw;
+    int scale = 1;
+    cv::Size sz(1920 / scale, 1080 / scale);
+    bool onSave = false;
+    cv::Mat img;
+    while (1) {
+        kinect.setRGB();
+        kinect.setSkeleton();
+        for (auto person : kinect.skeleton) {
+            for (auto joint : person) {
+                if (joint.TrackingState == TrackingState_NotTracked) continue;
+                ColorSpacePoint cp;
+                if (joint.JointType == 3) {
+                    std::string s_result_Y = "Y coordinate of Head : ";
+                    std::string s_result_X = "X coordinate of Head : ";
+                    coor_Y = joint.Position.Y;
+                    coor_X = joint.Position.X;
+                    string s_coor_Y = std::to_string(coor_Y);
+                    string s_coor_X = std::to_string(coor_X);
+                    s_result_Y = s_result_Y + s_coor_Y;
+                    s_result_X = s_result_X + s_coor_X;
+                    cv::putText(kinect.rgbImage, s_result_Y, cv::Point(30, 30), cv::FONT_HERSHEY_PLAIN, 2.0, cv::Scalar(0, 0, 255), 2);
+                    cv::putText(kinect.rgbImage, s_result_X, cv::Point(30, 60), cv::FONT_HERSHEY_PLAIN, 2.0, cv::Scalar(0, 0, 255), 2);
+                }
+                kinect.coordinateMapper->MapCameraPointToColorSpace(joint.Position, &cp);
+                cv::rectangle(kinect.rgbImage, cv::Rect((int)cp.X - 5, (int)cp.Y - 5, 10, 10), cv::Scalar(0, 0, 255), 2);
+            }
+        }
+        if (onSave) {
+            cv::resize(kinect.rgbImage, img, sz, 0, 0);
+            cv::cvtColor(img, img, CV_BGRA2BGR);
+            vw << img;
+        }
+
+        if (fram == 0) {
+            vw = cv::VideoWriter(now() + ".avi", CV_FOURCC_MACRO('X', 'V', 'I', 'D'), 10.0, sz);
+            //vw = cv::VideoWriter(now()+".mp4",CV_FOURCC_MACRO('F','M','P','4'), 30.0, sz);
+            //vw = cv::VideoWriter(now()+".mp4",CV_FOURCC_MACRO('M','P','4','V'), 30.0, sz);
+            if (!vw.isOpened()) throw runtime_error("cannot create video file");
+            onSave = true;
+        }
+
+        // 쓰러짐 알고리즘
+        if (fram % 20 == 0) {
+            rate_start_Y = coor_Y;
+        }
+        else if (fram % 20 == 1) {    //20프레임 = 0.4초 간격  Y 변화량 측정
+            rate_end_Y = coor_Y;
+            if ((rate_start_Y - rate_end_Y) > 0.5) {    //실험을 통한 오차 개선
+                dang = 1;
+                printf("rate_start_Y = %f, \n rate_end_Y = %f", rate_start_Y, rate_end_Y);
+            }
+        }
+        fram = fram + 1;
+        if (fram > 100) { //10초마다 영상 저장(저장코드) : 평상시 또한 저장
+            key_save = 's';
+            printf("rate_start_Y = %f, \n rate_end_Y = %f", rate_start_Y, rate_end_Y);
+            if (key_save == 's' && onSave) {
+                vw.release();
+                onSave = false;
+            }
+            fram = 0;
+
+            if (dang == 1) {
+                //이전영상 삭제 멈추기 코드
+            }
+            else { //dang == 0
+                // 이전영상 삭제하기
+            }
+        }
+
+
+        //촬영 화면 띄움
+        cv::imshow("rgb", kinect.rgbImage);
+        auto key = cv::waitKey(33);
+        if (key == 'q') break;
+    }
+    cv::destroyAllWindows();
+}
+
+int main(int argc, char** argv) {
+    try {
+        doJob();
+    }
+    catch (exception& ex) {
+        cout << ex.what() << endl;
+        string s;
+        cin >> s;
+    }
+    return 0;
+}
